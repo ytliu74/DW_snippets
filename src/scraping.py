@@ -4,27 +4,30 @@
 #  \  /\  /  __/ | (_| (_) | | | | | |  __/ | |_ 
 #   \/  \/ \___|_|\___\___/|_| |_| |_|\___|  \__|
 #                                                 
-# Asynchronous Parallel File Downloader
+# Asynchronous File Downloader
 # 
 # This code was developed by ChatGPT. Including this heading!
 # 
 # This script downloads files from a website using 
-#   asynchronous programming and parallel processing techniques.
+#   asynchronous programming techniques.
 #
 # Enjoy!
 
 
-import math
-import threading
-
-import aiohttp
 import asyncio
 import os
+import pickle
+import threading
+from collections import namedtuple
+from urllib.parse import urljoin
+
+import aiohttp
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
-from urllib.parse import urljoin
-from collections import namedtuple
+
+from .utils import VerilogInstance
+
 
 base_url = "https://www.synopsys.com/"
 url = "https://www.synopsys.com/dw/buildingblock.php"
@@ -52,7 +55,7 @@ for row in rows:
         link = Link(full_url, description)
         links.append(link)
 
-print("Links collected.")
+print("Links collect over.")
 
 # Create the "instantiation_demo" folder if it does not exist
 if not os.path.exists("instantiation_demo"):
@@ -60,22 +63,21 @@ if not os.path.exists("instantiation_demo"):
 
 
 # Define an asynchronous function to download a file and return its content
-async def download_file(session, url):
+async def download_file(session, url, description: str):
     async with session.get(url) as response:
-        return await response.read()
+        code =  await response.read()
+        return VerilogInstance(code, description)
 
-
-# Define an asynchronous function to download a subset of files
-async def download_subset(links_subset):
+# Define an asynchronous function to download all files
+async def download_all_files(links):
     async with aiohttp.ClientSession() as session:
         tasks = []
         hrefs = []
-        for link in links_subset:
+        for link in tqdm(links):
             # find the <a> tag element based on the text between the opening and closing <a> tags
             response = await session.get(link.url)
             soup = BeautifulSoup(await response.text(), "html.parser")
-            table = soup.find("table")
-            a_tag = table.find("a", string="Direct Instantiation in Verilog")
+            a_tag = soup.find("a", string="Direct Instantiation in Verilog")
             if a_tag is None:
                 tqdm.write(f'Warning: "Direct Instantiation in Verilog" not found in {link.url}')
             else:
@@ -83,39 +85,21 @@ async def download_subset(links_subset):
                 href = a_tag["href"]
                 hrefs.append(href)
                 # submit a download task to the event loop
-                task = asyncio.ensure_future(download_file(session, href))
+                task = asyncio.ensure_future(download_file(session, href, link.description))
                 tasks.append(task)
         # wait for all download tasks to complete
         results = await asyncio.gather(*tasks)
-        # save the content of each file to a separate file
-        for i, result in enumerate(results):
-            file_name = os.path.basename(hrefs[i])
-            file_path = os.path.join("instantiation_demo", file_name)
-            with open(file_path, "wb") as f:
-                f.write(result)
+        
+        # save the results to a pickle file "scraping_results.pkl"
+        with open("scraping_results.pkl", "wb") as f:
+            pickle.dump(results, f)
 
-
-# Define a function to divide the links into equal subsets
-def divide_links(links, num_subsets):
-    subset_size = math.ceil(len(links) / num_subsets)
-    return [links[i:i+subset_size] for i in range(0, len(links), subset_size)]
-
-
-# Create a new event loop in a separate thread and run the download function for each subset of links
-def run_download(links_subset):
+# Create a new event loop in a separate thread and run the download function
+def run_download():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(download_subset(links_subset))
+    loop.run_until_complete(download_all_files(links))
 
-
-# Divide the links into 8 subsets and assign each subset to a separate thread
-links_subsets = divide_links(links, 8)
-threads = []
-for links_subset in links_subsets:
-    thread = threading.Thread(target=run_download, args=(links_subset,))
-    thread.start()
-    threads.append(thread)
-
-# Wait for all threads to complete
-for thread in threads:
-    thread.join()
+thread = threading.Thread(target=run_download)
+thread.start()
+thread.join()
