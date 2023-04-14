@@ -6,7 +6,7 @@ from parsimonious.nodes import NodeVisitor
 # Define the Verilog grammar
 verilog_grammar = Grammar(
     r"""
-    Instance      = Name ParameterList? Name PortList ";"
+    Instance      = Comments* Name ParameterList? Name PortList ";"
 
     ParameterList = "#" "(" Parameter+ ")"
     Parameter     = Name ("," / "")
@@ -14,6 +14,7 @@ verilog_grammar = Grammar(
     PortList      = "(" Port+ ")"
     Port          = ws "." Name "(" Name ")" ("," / "") ws
 
+    Comments      = ws "//" ~".*" ws
     Name          = ws ~"\w+" ws
     ws            = ~"\s*"
     """
@@ -22,7 +23,7 @@ verilog_grammar = Grammar(
 
 class VerilogVisitor(NodeVisitor):
     def visit_Instance(self, node, visited_children):
-        module_name, parameters, _, ports, _ = visited_children
+        _, module_name, parameters, _, ports, _ = visited_children
         parameters = parameters[0] if isinstance(parameters, list) else None
 
         return {
@@ -52,19 +53,16 @@ class VerilogVisitor(NodeVisitor):
         return visited_children or node
 
 
-def extract_instance(file_path: str) -> dict:
-    # Load the Verilog file and preprocess it
-    with open(file_path, "r") as f:
-        verilog_code = f.read()
-        start_index = verilog_code.lower().find("// instance of ")
-        assert start_index >= 0, "Error: search string not found"
-        verilog_code = verilog_code[start_index:]
-        end_index = verilog_code.find(";")
-        assert end_index >= 0, "Error: delimiter not found"
-        verilog_code = verilog_code[: end_index + 1]
-        comment_index = verilog_code.find("\n")
-        assert comment_index >= 0, "Error: comment line not found"
-        verilog_code = verilog_code[comment_index + 1 :]
+def extract_instance(verilog_code: str) -> dict:
+    start_index = verilog_code.lower().find("// instance of ")
+    assert start_index >= 0, "Error: search string not found"
+    verilog_code = verilog_code[start_index:]
+    end_index = verilog_code.find(";")
+    assert end_index >= 0, "Error: delimiter not found"
+    verilog_code = verilog_code[: end_index + 1]
+    comment_index = verilog_code.find("\n")
+    assert comment_index >= 0, "Error: comment line not found"
+    verilog_code = verilog_code[comment_index + 1 :]
 
     verilog_tree = verilog_grammar.parse(verilog_code)
     verilog_visitor = VerilogVisitor()
